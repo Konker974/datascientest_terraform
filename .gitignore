@@ -1,0 +1,8 @@
+terraform.tfvars
+plan.json
+terraform.tfstate*
+tfplan
+aws/*
+.terraform/*
+.terraform/providers/registry.terraform.io/hashicorp/aws/6.50.0/linux_amd64/terraform-provider-aws_v6.50.0_x5
+.terraform.lock.hcl

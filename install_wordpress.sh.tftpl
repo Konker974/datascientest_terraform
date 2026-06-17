@@ -1,0 +1,54 @@
+#!/bin/bash
+set -euo pipefail
+
+DB_NAME="${db_name}"
+DB_USER="${db_username}"
+DB_PASSWORD="${db_password}"
+DB_HOST="${db_host}"
+WORDPRESS_DIR="/var/www/html"
+
+sudo yum update -y
+sudo yum install -y httpd mod_ssl openssl php php-mysqlnd php-fpm php-json php-gd php-mbstring php-xml php-intl php-zip wget unzip rsync
+
+sudo systemctl enable --now httpd
+
+cd /tmp
+wget -q https://wordpress.org/latest.zip
+unzip -q -o latest.zip
+
+sudo rsync -a /tmp/wordpress/ "$${WORDPRESS_DIR}/"
+sudo chown -R apache:apache "$${WORDPRESS_DIR}"
+
+cp "$${WORDPRESS_DIR}/wp-config-sample.php" "$${WORDPRESS_DIR}/wp-config.php"
+
+sed -i "s/database_name_here/$${DB_NAME}/" "$${WORDPRESS_DIR}/wp-config.php"
+sed -i "s/username_here/$${DB_USER}/" "$${WORDPRESS_DIR}/wp-config.php"
+sed -i "s/password_here/$${DB_PASSWORD}/" "$${WORDPRESS_DIR}/wp-config.php"
+sed -i "s/localhost/$${DB_HOST}/" "$${WORDPRESS_DIR}/wp-config.php"
+
+sudo find "$${WORDPRESS_DIR}" -type d -exec chmod 755 {} \;
+sudo find "$${WORDPRESS_DIR}" -type f -exec chmod 644 {} \;
+
+# Bonus HTTPS: certificat autosigne pour activer TLS sur 443
+PUBLIC_HOSTNAME="$$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)"
+sudo openssl req -x509 -nodes -newkey rsa:2048 \
+  -keyout /etc/pki/tls/private/localhost.key \
+  -out /etc/pki/tls/certs/localhost.crt \
+  -days 365 \
+  -subj "/CN=$${PUBLIC_HOSTNAME}"
+
+sudo tee /etc/httpd/conf.d/wordpress-ssl.conf >/dev/null <<'EOF'
+<VirtualHost *:443>
+  ServerName localhost
+  DocumentRoot /var/www/html
+  SSLEngine on
+  SSLCertificateFile /etc/pki/tls/certs/localhost.crt
+  SSLCertificateKeyFile /etc/pki/tls/private/localhost.key
+  <Directory /var/www/html>
+    AllowOverride All
+    Require all granted
+  </Directory>
+</VirtualHost>
+EOF
+
+sudo systemctl restart httpd
