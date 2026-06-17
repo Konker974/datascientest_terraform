@@ -1,0 +1,10 @@
+access_key = "access_key"
+secret_key = "secret_key"
+
+region            = "eu-west-3"
+ebs_size          = 10
+db_instance_class = "db.t3.micro"
+
+db_name     = "db_name"
+db_username = "db_username"
+db_password = "db_password"
