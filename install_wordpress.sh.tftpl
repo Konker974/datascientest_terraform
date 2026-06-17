@@ -1,5 +1,6 @@
 #!/bin/bash
-set -euo pipefail
+exec > /var/log/user-data.log 2>&1
+set -uo pipefail
 
 DB_NAME="${db_name}"
 DB_USER="${db_username}"
@@ -7,37 +8,63 @@ DB_PASSWORD="${db_password}"
 DB_HOST="${db_host}"
 WORDPRESS_DIR="/var/www/html"
 
-sudo yum update -y
-sudo yum install -y httpd mod_ssl openssl php php-mysqlnd php-fpm php-json php-gd php-mbstring php-xml php-intl php-zip wget unzip rsync
+# Attendre que le réseau externe soit accessible
+echo "Attente du réseau..."
+until curl -sf --max-time 5 https://wordpress.org > /dev/null; do
+  echo "Réseau pas encore disponible, nouvelle tentative dans 5s..."
+  sleep 5
+done
+echo "Réseau disponible."
 
+# Mise à jour système
+sudo yum update -y
+
+# PHP 8.2 via amazon-linux-extras (obligatoire sur AL2)
+sudo amazon-linux-extras enable php8.2
+sudo yum clean metadata
+
+# Installation Apache + PHP 8.2 + extensions WordPress
+sudo yum install -y httpd mod_ssl openssl \
+  php php-mysqlnd php-fpm php-json php-gd \
+  php-mbstring php-xml php-intl php-zip \
+  wget unzip rsync
+
+# Démarrage Apache
 sudo systemctl enable --now httpd
 
+# Téléchargement WordPress
 cd /tmp
 wget -q https://wordpress.org/latest.zip
 unzip -q -o latest.zip
 
+# Déploiement
 sudo rsync -a /tmp/wordpress/ "$${WORDPRESS_DIR}/"
 sudo chown -R apache:apache "$${WORDPRESS_DIR}"
 
+# Configuration wp-config.php
 cp "$${WORDPRESS_DIR}/wp-config-sample.php" "$${WORDPRESS_DIR}/wp-config.php"
-
 sed -i "s/database_name_here/$${DB_NAME}/" "$${WORDPRESS_DIR}/wp-config.php"
 sed -i "s/username_here/$${DB_USER}/" "$${WORDPRESS_DIR}/wp-config.php"
 sed -i "s/password_here/$${DB_PASSWORD}/" "$${WORDPRESS_DIR}/wp-config.php"
 sed -i "s/localhost/$${DB_HOST}/" "$${WORDPRESS_DIR}/wp-config.php"
 
+# Permissions
 sudo find "$${WORDPRESS_DIR}" -type d -exec chmod 755 {} \;
 sudo find "$${WORDPRESS_DIR}" -type f -exec chmod 644 {} \;
 
-# Bonus HTTPS: certificat autosigne pour activer TLS sur 443
-PUBLIC_HOSTNAME="$$(curl -s http://169.254.169.254/latest/meta-data/public-hostname)"
+# Bonus HTTPS : certificat auto-signé
+# Récupération du hostname public avec fallback sur l'IP publique
+PUBLIC_HOSTNAME="$(curl -sf --max-time 5 http://169.254.169.254/latest/meta-data/public-hostname || \
+                   curl -sf --max-time 5 http://169.254.169.254/latest/meta-data/public-ipv4 || \
+                   echo "localhost")"
+
 sudo openssl req -x509 -nodes -newkey rsa:2048 \
   -keyout /etc/pki/tls/private/localhost.key \
   -out /etc/pki/tls/certs/localhost.crt \
   -days 365 \
   -subj "/CN=$${PUBLIC_HOSTNAME}"
 
-sudo tee /etc/httpd/conf.d/wordpress-ssl.conf >/dev/null <<'EOF'
+sudo tee /etc/httpd/conf.d/wordpress-ssl.conf >/dev/null <<'APACHECONF'
 <VirtualHost *:443>
   ServerName localhost
   DocumentRoot /var/www/html
@@ -49,6 +76,7 @@ sudo tee /etc/httpd/conf.d/wordpress-ssl.conf >/dev/null <<'EOF'
     Require all granted
   </Directory>
 </VirtualHost>
-EOF
+APACHECONF
 
 sudo systemctl restart httpd
+echo "WordPress installation complete."
