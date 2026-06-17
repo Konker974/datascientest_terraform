@@ -33,6 +33,9 @@ resource "aws_instance" "ec2_public" {
   key_name                    = var.key_name
   availability_zone           = data.aws_availability_zones.available.names[0]
   user_data_replace_on_change = true
+    lifecycle {
+    create_before_destroy = false
+  }
 
   user_data = templatefile("${path.root}/install_wordpress.sh.tftpl", {
     db_name     = var.db_name

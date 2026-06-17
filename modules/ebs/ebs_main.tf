@@ -12,4 +12,8 @@ resource "aws_volume_attachment" "dst_ebs_att" {
   volume_id    = aws_ebs_volume.dst_ebs.id
   instance_id  = var.instance_id
   force_detach = true
+  lifecycle {
+    create_before_destroy = false
+    replace_triggered_by  = [var.instance_id]
+  }
 }
